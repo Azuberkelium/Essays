@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Essay Architect Pro</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f3f4f6; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .phrase-btn:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- Custom Hook for Local Storage ---
+        function useLocalStorage(key, initialValue) {
+            const [storedValue, setStoredValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    console.error("Error reading localStorage", error);
+                    return initialValue;
+                }
+            });
+
+            const setValue = (value) => {
+                try {
+                    const valueToStore = value instanceof Function ? value(storedValue) : value;
+                    setStoredValue(valueToStore);
+                    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+                } catch (error) {
+                    console.error("Error setting localStorage", error);
+                }
+            };
+            return [storedValue, setValue];
+        }
+
+        // --- Utility Functions ---
+        const countWords = (str) => {
+            if (!str) return 0;
+            return str.trim().split(/\s+/).filter(word => word.length > 0).length;
+        };
+
+        const calculateDaysLeft = (dueDate) => {
+            if (!dueDate) return null;
+            const due = new Date(dueDate);
+            const today = new Date();
+            const diffTime = due - today;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            return diffDays;
+        };
+
+        // --- Reference Data ---
+        const PROCESS_WORDS = [
+            { word: "Analyse", def: "Discuss in detail - resolve into component parts, identify separate factors." },
+            { word: "Appraise", def: "Evaluate, find the value of... consider positive/negative points." },
+            { word: "Argue", def: "Make a case for or against - points must be supported with evidence." },
+            { word: "Assess", def: "Give careful consideration to factors, identify most important. Estimate worth." },
+            { word: "Compare", def: "Look for similarities and differences. Reach conclusion to relative merits." },
+            { word: "Contrast", def: "Set items/opinions in opposition to sharply illustrate differences." },
+            { word: "Criticise", def: "Make a judgment backed up with argument and evidence." },
+            { word: "Evaluate", def: "Assess and give your judgment, support with references." },
+            { word: "Justify", def: "Give reasons or evidence to support your opinion or view." }
+        ];
+
+        const PHRASEBANK = [
+            { category: "Strength of Evidence", phrases: ["The existing evidence for X is strong.", "There is limited evidence to suggest that...", "The evidence presented clearly indicates...", "Mounting evidence suggests..."] },
+            { category: "Adding / Emphasising", phrases: ["Furthermore, ", "Moreover, ", "In addition to this, ", "Equally important is..."] },
+            { category: "Contrasting / Opposing", phrases: ["Conversely, ", "Nevertheless, ", "On the contrary, ", "Despite this evidence, ", "However, "] },
+            { category: "Concluding / Causal", phrases: ["Thus, ", "Therefore, ", "Consequently, ", "As a result, ", "In summary, "] }
+        ];
+
+        // --- Default Essay Template ---
+        const createNewEssay = () => ({
+            id: Date.now().toString(),
+            title: "New Essay Draft",
+            dueDate: "",
+            setup: { question: "", processWord: "", thesis: "" },
+            brainstorm: { 
+                pros: [{ id: Date.now(), text: "" }], 
+                cons: [{ id: Date.now() + 1, text: "" }] 
+            },
+            sources: {
+                introStat: "", introDef1: "", introDef2: "",
+                bodySources: [{ id: 1, point: "", source: "" }, { id: 2, point: "", source: "" }]
+            },
+            intro: { statOpening: "", background: "", defineWords: "", thesis: "", structure: "" },
+            bodyParas: [
+                { id: 1, type: "PRO", signpost: "", source: "", explain: "", critical: "", caseStudy: "", link: "", evaluation: "" }
+            ],
+            conclusion: { summarise: "", evaluate: "", limitations: "", future: "" }
+        });
+
+        // --- Application Components ---
+        function App() {
+            const [essays, setEssays] = useLocalStorage("essay_architect_projects", []);
+            const [activeEssayId, setActiveEssayId] = useState(null);
+            const [notification, setNotification] = useState("");
+
+            const activeEssay = essays.find(e => e.id === activeEssayId);
+
+            const showNotification = (msg) => {
+                setNotification(msg);
+                setTimeout(() => setNotification(""), 3000);
+            };
+
+            const handleCreateEssay = () => {
+                const newEssay = createNewEssay();
+                setEssays([...essays, newEssay]);
+                setActiveEssayId(newEssay.id);
+            };
+
+            const handleDeleteEssay = (id) => {
+                if (window.confirm("Delete this essay plan forever?")) {
+                    setEssays(essays.filter(e => e.id !== id));
+                    if (activeEssayId === id) setActiveEssayId(null);
+                }
+            };
+
+            const updateActiveEssay = (updatedEssay) => {
+                setEssays(essays.map(e => e.id === updatedEssay.id ? updatedEssay : e));
+            };
+
+            return (
+                <div className="h-screen w-full flex flex-col overflow-hidden bg-gray-50 text-gray-800">
+                    {/* Header */}
+                    <header className="bg-indigo-700 text-white p-4 shadow-md flex justify-between items-center z-20">
+                        <div className="flex items-center gap-4">
+                            <h1 className="text-2xl font-bold tracking-tight cursor-pointer" onClick={() => setActiveEssayId(null)}>
+                                🏛️ Essay Architect Pro
+                            </h1>
+                            {activeEssayId && (
+                                <button onClick={() => setActiveEssayId(null)} className="text-indigo-200 hover:text-white text-sm bg-indigo-800 px-3 py-1 rounded">
+                                    ← Back to Dashboard
+                                </button>
+                            )}
+                        </div>
+                        <div className="text-sm font-medium opacity-80">Local Autosave Active</div>
+                    </header>
+
+                    {/* Global Notification */}
+                    {notification && (
+                        <div className="absolute top-16 right-4 bg-green-500 text-white px-4 py-2 rounded shadow-lg font-medium text-sm z-50 animate-bounce">
+                            {notification}
+                        </div>
+                    )}
+
+                    {/* Main Content Area */}
+                    <main className="flex-1 overflow-hidden flex">
+                        {!activeEssayId ? (
+                            <Dashboard essays={essays} onCreate={handleCreateEssay} onOpen={setActiveEssayId} onDelete={handleDeleteEssay} />
+                        ) : (
+                            <Workspace essay={activeEssay} updateEssay={updateActiveEssay} notify={showNotification} />
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        // --- Dashboard Component ---
+        function Dashboard({ essays, onCreate, onOpen, onDelete }) {
+            return (
+                <div className="flex-1 overflow-y-auto p-8">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="flex justify-between items-end mb-8 border-b pb-4">
+                            <div>
+                                <h2 className="text-3xl font-bold text-gray-800">Your Essay Plans</h2>
+                                <p className="text-gray-600 mt-1">Manage, plan, and write multiple essays directly in your browser.</p>
+                            </div>
+                            <button onClick={onCreate} className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-indigo-700 transition">
+                                + Create New Essay Plan
+                            </button>
+                        </div>
+
+                        {essays.length === 0 ? (
+                            <div className="text-center p-12 bg-white rounded-xl shadow-sm border border-gray-200">
+                                <p className="text-gray-500 mb-4">You don't have any essay plans yet.</p>
+                                <button onClick={onCreate} className="text-indigo-600 font-bold hover:underline">Start your first plan</button>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {essays.map(essay => {
+                                    const daysLeft = calculateDaysLeft(essay.dueDate);
+                                    let badgeColor = "bg-gray-100 text-gray-800";
+                                    let urgencyText = "No Due Date";
+                                    
+                                    if (daysLeft !== null) {
+                                        if (daysLeft < 0) { badgeColor = "bg-red-100 text-red-800"; urgencyText = "Overdue"; }
+                                        else if (daysLeft <= 3) { badgeColor = "bg-red-100 text-red-800"; urgencyText = `${daysLeft} days left!`; }
+                                        else if (daysLeft <= 7) { badgeColor = "bg-yellow-100 text-yellow-800"; urgencyText = `${daysLeft} days left`; }
+                                        else { badgeColor = "bg-green-100 text-green-800"; urgencyText = `${daysLeft} days left`; }
+                                    }
+
+                                    const totalWords = countWords(JSON.stringify(essay.intro) + JSON.stringify(essay.bodyParas) + JSON.stringify(essay.conclusion));
+
+                                    return (
+                                        <div key={essay.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition flex flex-col">
+                                            <div className="flex justify-between items-start mb-4">
+                                                <h3 className="font-bold text-xl text-gray-800 line-clamp-2">{essay.title || "Untitled Essay"}</h3>
+                                            </div>
+                                            <p className="text-sm text-gray-500 mb-4 line-clamp-2">{essay.setup.question || "No question defined yet."}</p>
+                                            
+                                            <div className="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between">
+                                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${badgeColor}`}>
+                                                    📅 {urgencyText}
+                                                </span>
+                                                <span className="text-xs text-gray-500 font-semibold">{totalWords} words</span>
+                                            </div>
+
+                                            <div className="flex gap-2 mt-4">
+                                                <button onClick={() => onOpen(essay.id)} className="flex-1 bg-indigo-50 text-indigo-700 py-2 rounded-lg text-sm font-bold hover:bg-indigo-100 transition">
+                                                    Open / Edit
+                                                </button>
+                                                <button onClick={() => onDelete(essay.id)} className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm font-bold hover:bg-red-100 transition">
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // --- Shared Textarea Component ---
+        const WordCountTextarea = ({ label, target, value, onChange, placeholder, helpText }) => {
+            const count = countWords(value);
+            const isOver = count > target + 10;
+            const progress = Math.min((count / target) * 100, 100);
+
+            return (
+                <div className="mb-5">
+                    <div className="flex justify-between items-end mb-1">
+                        <label className="block text-sm font-bold text-gray-700">{label}</label>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${isOver ? 'bg-red-100 text-red-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            {count} / {target} wds
+                        </span>
+                    </div>
+                    {helpText && <p className="text-xs text-gray-500 mb-2 italic">{helpText}</p>}
+                    <textarea
+                        className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-y min-h-[100px] text-gray-800 leading-relaxed"
+                        value={value || ""}
+                        onChange={(e) => onChange(e.target.value)}
+                        placeholder={placeholder}
+                    />
+                    <div className="h-1 w-full bg-gray-200 rounded-full mt-1 overflow-hidden">
+                        <div className={`h-full ${isOver ? 'bg-red-500' : 'bg-indigo-500'}`} style={{ width: `${progress}%` }}></div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Workspace (Editor) Component ---
+        function Workspace({ essay, updateEssay, notify }) {
+            const [activeTab, setActiveTab] = useState("setup");
+            const [showCheatSheet, setShowCheatSheet] = useState(true);
+
+            // Backward compatibility for essays created without brainstorm
+            const currentBrainstorm = essay.brainstorm || { pros: [], cons: [] };
+
+            const updateRoot = (field, val) => updateEssay({ ...essay, [field]: val });
+            const updateSetup = (field, val) => updateEssay({ ...essay, setup: { ...essay.setup, [field]: val } });
+            const updateSources = (field, val) => updateEssay({ ...essay, sources: { ...essay.sources, [field]: val } });
+            const updateIntro = (field, val) => updateEssay({ ...essay, intro: { ...essay.intro, [field]: val } });
+            const updateConclusion = (field, val) => updateEssay({ ...essay, conclusion: { ...essay.conclusion, [field]: val } });
+            
+            // Brainstorming Handlers
+            const addBrainstormPoint = (type) => {
+                const newPoint = { id: Date.now(), text: "" };
+                updateEssay({ ...essay, brainstorm: { ...currentBrainstorm, [type]: [...currentBrainstorm[type], newPoint] } });
+            };
+            const updateBrainstormPoint = (type, id, val) => {
+                const newArr = currentBrainstorm[type].map(p => p.id === id ? { ...p, text: val } : p);
+                updateEssay({ ...essay, brainstorm: { ...currentBrainstorm, [type]: newArr } });
+            };
+            const removeBrainstormPoint = (type, id) => {
+                const newArr = currentBrainstorm[type].filter(p => p.id !== id);
+                updateEssay({ ...essay, brainstorm: { ...currentBrainstorm, [type]: newArr } });
+            };
+
+            // Source Handlers
+            const updateBodySource = (id, field, val) => {
+                const newSources = essay.sources.bodySources.map(s => s.id === id ? { ...s, [field]: val } : s);
+                updateSources("bodySources", newSources);
+            };
+            const addBodySource = () => {
+                const newId = Date.now();
+                updateSources("bodySources", [...essay.sources.bodySources, { id: newId, point: "", source: "" }]);
+            };
+            const removeBodySource = (id) => updateSources("bodySources", essay.sources.bodySources.filter(s => s.id !== id));
+
+            // Paragraph Handlers
+            const updateBodyPara = (id, field, val) => {
+                const newParas = essay.bodyParas.map(p => p.id === id ? { ...p, [field]: val } : p);
+                updateEssay({ ...essay, bodyParas: newParas });
+            };
+            const addParagraph = (type) => {
+                const newId = Date.now();
+                updateEssay({ ...essay, bodyParas: [...essay.bodyParas, { id: newId, type, signpost: "", source: "", explain: "", critical: "", caseStudy: "", link: "", evaluation: "" }] });
+            };
+            const removeParagraph = (id) => updateEssay({ ...essay, bodyParas: essay.bodyParas.filter(p => p.id !== id) });
+
+            const copyToClipboard = (text) => {
+                navigator.clipboard.writeText(text).then(() => notify("Copied to clipboard!"));
+            };
+
+            const compileFullEssay = () => {
+                const i = essay.intro;
+                const introText = `${i.statOpening} ${i.background} ${i.defineWords} ${i.thesis} ${i.structure}`.trim();
+                
+                const bodyText = essay.bodyParas.map(p => {
+                    return `${p.signpost} ${p.source} ${p.explain} ${p.critical} ${p.caseStudy} ${p.link} ${p.evaluation}`.replace(/\s+/g, ' ').trim();
+                }).join("\n\n");
+
+                const c = essay.conclusion;
+                const concText = `${c.summarise} ${c.evaluate} ${c.limitations} ${c.future}`.trim();
+
+                return `${introText}\n\n${bodyText}\n\n${concText}`;
+            };
+
+            // --- Tab Renderers ---
+            const renderSetup = () => (
+                <div className="space-y-6">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800">1. Setup & Plan</h2>
+                            <p className="text-gray-500 text-sm">Define the core parameters and deadline for this essay.</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 mt-6">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Essay Title</label>
+                                <input type="text" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" 
+                                    value={essay.title} onChange={e => updateRoot("title", e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Due Date</label>
+                                <input type="date" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" 
+                                    value={essay.dueDate} onChange={e => updateRoot("dueDate", e.target.value)} />
+                            </div>
+                        </div>
+
+                        <div className="mt-4">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">The Question</label>
+                            <textarea className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" rows="2"
+                                value={essay.setup.question} onChange={e => updateSetup("question", e.target.value)} placeholder="What exactly are you answering?"></textarea>
+                        </div>
+
+                        <div className="mt-4">
+                            <label className="block text-sm font-bold text-gray-700 mb-1">Process Word (From Step 1)</label>
+                            <select className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                value={essay.setup.processWord} onChange={e => updateSetup("processWord", e.target.value)}>
+                                <option value="">Select process word...</option>
+                                {PROCESS_WORDS.map(pw => <option key={pw.word} value={pw.word}>{pw.word}</option>)}
+                            </select>
+                            {essay.setup.processWord && (
+                                <p className="text-sm mt-2 text-indigo-700 bg-indigo-50 p-3 rounded-lg font-medium border border-indigo-100">
+                                    <strong>Meaning:</strong> {PROCESS_WORDS.find(p => p.word === essay.setup.processWord)?.def}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* NEW: Brainstorming Board */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        <h2 className="text-xl font-bold text-gray-800 mb-1">Brainstorming Board</h2>
+                        <p className="text-gray-500 text-sm mb-4">Step 2: Put ideas in pros and cons / for and against columns before writing your thesis.</p>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {/* Pros Column */}
+                            <div className="bg-green-50 p-4 rounded-lg border border-green-100">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h3 className="font-bold text-green-800">Pro Points (For)</h3>
+                                    <button onClick={() => addBrainstormPoint('pros')} className="text-xs bg-green-200 text-green-800 px-2 py-1 rounded font-bold hover:bg-green-300">+ Add Point</button>
+                                </div>
+                                <div className="space-y-2">
+                                    {currentBrainstorm.pros.map((p, idx) => (
+                                        <div key={p.id} className="flex gap-2 items-start">
+                                            <span className="font-bold text-green-600 mt-2 text-sm">{idx + 1}.</span>
+                                            <textarea className="w-full p-2 text-sm border border-green-200 rounded outline-none focus:ring-1 focus:ring-green-400 resize-none" rows="2"
+                                                placeholder="Enter supporting point..." value={p.text} onChange={e => updateBrainstormPoint('pros', p.id, e.target.value)}></textarea>
+                                            <button onClick={() => removeBrainstormPoint('pros', p.id)} className="text-red-400 hover:text-red-600 font-bold p-1">✕</button>
+                                        </div>
+                                    ))}
+                                    {currentBrainstorm.pros.length === 0 && <p className="text-xs text-green-600 italic">No points added yet.</p>}
+                                </div>
+                            </div>
+
+                            {/* Cons Column */}
+                            <div className="bg-red-50 p-4 rounded-lg border border-red-100">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h3 className="font-bold text-red-800">Counter Points (Against)</h3>
+                                    <button onClick={() => addBrainstormPoint('cons')} className="text-xs bg-red-200 text-red-800 px-2 py-1 rounded font-bold hover:bg-red-300">+ Add Point</button>
+                                </div>
+                                <div className="space-y-2">
+                                    {currentBrainstorm.cons.map((c, idx) => (
+                                        <div key={c.id} className="flex gap-2 items-start">
+                                            <span className="font-bold text-red-600 mt-2 text-sm">{idx + 1}.</span>
+                                            <textarea className="w-full p-2 text-sm border border-red-200 rounded outline-none focus:ring-1 focus:ring-red-400 resize-none" rows="2"
+                                                placeholder="Enter counter point..." value={c.text} onChange={e => updateBrainstormPoint('cons', c.id, e.target.value)}></textarea>
+                                            <button onClick={() => removeBrainstormPoint('cons', c.id)} className="text-red-400 hover:text-red-600 font-bold p-1">✕</button>
+                                        </div>
+                                    ))}
+                                    {currentBrainstorm.cons.length === 0 && <p className="text-xs text-red-600 italic">No points added yet.</p>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 border-l-4 border-l-indigo-500">
+                        <label className="block text-lg font-bold text-indigo-800 mb-1">Working Thesis</label>
+                        <p className="text-sm text-gray-500 mb-3">Review your brainstorm above. What is the core argument you will defend?</p>
+                        <textarea className="w-full p-3 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 font-medium" rows="3"
+                            value={essay.setup.thesis} onChange={e => updateSetup("thesis", e.target.value)} placeholder="State your main argument clearly..."></textarea>
+                    </div>
+                </div>
+            );
+
+            const renderSources = () => (
+                <div className="space-y-6">
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-2">2. Sources (Sheet 2)</h2>
+                        <p className="text-gray-500 text-sm mb-6">Gather your quotes, stats, definitions, and body sources here before writing.</p>
+                        
+                        <h3 className="font-bold text-lg text-indigo-700 mb-3 border-b pb-2">Introduction Needs</h3>
+                        <div className="space-y-4 mb-6">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Opening Stat / Quote</label>
+                                <input type="text" className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500" 
+                                    value={essay.sources.introStat} onChange={e => updateSources("introStat", e.target.value)} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Define Word 1 & Source</label>
+                                    <input type="text" className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500" 
+                                        value={essay.sources.introDef1} onChange={e => updateSources("introDef1", e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">Define Word 2 & Source</label>
+                                    <input type="text" className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500" 
+                                        value={essay.sources.introDef2} onChange={e => updateSources("introDef2", e.target.value)} />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-between items-center mb-3 border-b pb-2">
+                            <h3 className="font-bold text-lg text-indigo-700">Body Paragraph Sources</h3>
+                            <button onClick={addBodySource} className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1 rounded font-bold hover:bg-indigo-200">+ Add Source</button>
+                        </div>
+                        <div className="space-y-3">
+                            {essay.sources.bodySources.map((src, idx) => (
+                                <div key={src.id} className="flex gap-3 items-start bg-gray-50 p-3 rounded border border-gray-200">
+                                    <div className="font-bold text-gray-400 mt-2">{idx + 1}.</div>
+                                    <div className="flex-1 space-y-2">
+                                        <input type="text" placeholder="Point/Argument to prove..." className="w-full p-2 text-sm border border-gray-300 rounded" 
+                                            value={src.point} onChange={e => updateBodySource(src.id, "point", e.target.value)} />
+                                        <textarea placeholder="Citation & what they found (e.g. Jon, 2023 - discovered that...)" className="w-full p-2 text-sm border border-gray-300 rounded resize-none" rows="2"
+                                            value={src.source} onChange={e => updateBodySource(src.id, "source", e.target.value)}></textarea>
+                                    </div>
+                                    <button onClick={() => removeBodySource(src.id)} className="text-red-400 hover:text-red-600 font-bold p-2">✕</button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderIntro = () => (
+                <div className="space-y-6 bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                    <h2 className="text-2xl font-bold text-gray-800">3. Introduction (Sheet 3)</h2>
+                    <p className="text-gray-500 text-sm mb-6">Target: ~250 words total. Takes the reader into your essay.</p>
+
+                    <WordCountTextarea label="Stat/Opening (50 words)" target={50} value={essay.intro.statOpening} onChange={v => updateIntro("statOpening", v)}
+                        helpText="Emotional/human side. Shocking fact or quote. Hold attention." />
+                    <WordCountTextarea label="Background/Value (50 words)" target={50} value={essay.intro.background} onChange={v => updateIntro("background", v)}
+                        helpText="What is debated? Since when? Ensure knowledge to understand key points." />
+                    <WordCountTextarea label="Define Words (50 words)" target={50} value={essay.intro.defineWords} onChange={v => updateIntro("defineWords", v)}
+                        helpText="Define question parameters, process words, and measures to judge." />
+                    <WordCountTextarea label="Thesis Statement (50 words)" target={50} value={essay.intro.thesis} onChange={v => updateIntro("thesis", v)}
+                        helpText="One clear line. Simple enough for a child. What are you testing?" />
+                    <WordCountTextarea label="Structure (50 words)" target={50} value={essay.intro.structure} onChange={v => updateIntro("structure", v)}
+                        helpText="How will the essay flow? Signposts for each body paragraph." />
+                </div>
+            );
+
+            const renderBody = () => (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-4">
+                        <div>
+                            <h2 className="text-2xl font-bold text-gray-800">4. Body Paragraphs (Sheet 1 & 3)</h2>
+                            <p className="text-gray-500 text-sm">Follow the Pro/Counter argument structure. Target ~350+ words per block.</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => addParagraph("PRO")} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700">+ Add PRO Point</button>
+                            <button onClick={() => addParagraph("COUNTER")} className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700">+ Add COUNTER Point</button>
+                        </div>
+                    </div>
+
+                    {essay.bodyParas.map((para, index) => (
+                        <div key={para.id} className={`bg-white p-6 rounded-xl shadow-sm border-t-8 ${para.type === 'PRO' ? 'border-green-500' : 'border-red-500'}`}>
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className={`text-xl font-bold ${para.type === 'PRO' ? 'text-green-800' : 'text-red-800'}`}>
+                                    Paragraph {index + 1}: {para.type} Argument
+                                </h3>
+                                <button onClick={() => removeParagraph(para.id)} className="text-red-400 text-sm font-bold hover:underline">Remove Paragraph</button>
+                            </div>
+
+                            <WordCountTextarea label="Signpost/Point (50 words)" target={50} value={para.signpost} onChange={v => updateBodyPara(para.id, "signpost", v)}
+                                helpText="Link from above. What is the key claim/point of this paragraph?" />
+                            <WordCountTextarea label="Source - What did they find? (50 words)" target={50} value={para.source} onChange={v => updateBodyPara(para.id, "source", v)}
+                                helpText="Synthesise sources (Jon, 2023). Cite your evidence." />
+                            <WordCountTextarea label="Explain - Relevance (50+ words)" target={75} value={para.explain} onChange={v => updateBodyPara(para.id, "explain", v)}
+                                helpText="Don't just rephrase! Link to lectures/theory. Why is it effective?" />
+                            <WordCountTextarea label="(Optional) Critical of the Source (50 words)" target={50} value={para.critical} onChange={v => updateBodyPara(para.id, "critical", v)}
+                                helpText="Contradict the first bit of evidence. Limitations, gaps." />
+                            <WordCountTextarea label="(Optional) Add Case Study / Modern Example (50 words)" target={50} value={para.caseStudy} onChange={v => updateBodyPara(para.id, "caseStudy", v)}
+                                helpText="Ground the theory in a real-world scenario." />
+                            <WordCountTextarea label="Link point to thesis/question (50 words)" target={50} value={para.link} onChange={v => updateBodyPara(para.id, "link", v)}
+                                helpText="Summarise point. 'In light of evidence...' Link back to Thesis." />
+                            
+                            {para.type === "COUNTER" && (
+                                <div className="mt-6 pt-6 border-t-2 border-dashed border-gray-200 bg-red-50 p-4 rounded mt-4">
+                                    <WordCountTextarea label="Evaluation of Both Points (50 words)" target={50} value={para.evaluation} onChange={v => updateBodyPara(para.id, "evaluation", v)}
+                                        helpText="Mini summary weighing the Pro and Counter. Which is stronger?" />
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            );
+
+            const renderConclusion = () => (
+                <div className="space-y-6 bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                    <h2 className="text-2xl font-bold text-gray-800">5. Conclusion (Sheet 3)</h2>
+                    <p className="text-gray-500 text-sm mb-6">Target: ~200ish words. No new sources here!</p>
+
+                    <WordCountTextarea label="Summarise points (50 words)" target={50} value={essay.conclusion.summarise} onChange={v => updateConclusion("summarise", v)}
+                        helpText="Pull from the short summaries at the end of your body points." />
+                    <WordCountTextarea label="Evaluate & Answer Thesis (50 words)" target={50} value={essay.conclusion.evaluate} onChange={v => updateConclusion("evaluate", v)}
+                        helpText="Neatly wrap it up. State why it matters and definitively answer the question." />
+                    <WordCountTextarea label="Limitations of Essay (50 words)" target={50} value={essay.conclusion.limitations} onChange={v => updateConclusion("limitations", v)}
+                        helpText="What couldn't you answer? Skill gaps or limits in the literature." />
+                    <WordCountTextarea label="Future Thoughts & Clincher (25 words)" target={25} value={essay.conclusion.future} onChange={v => updateConclusion("future", v)}
+                        helpText="Recommendations for future. Last line should be positive and thoughtful." />
+                </div>
+            );
+
+            const renderCompile = () => {
+                const text = compileFullEssay();
+                return (
+                    <div className="space-y-6 bg-white p-6 rounded-xl shadow-sm border border-gray-200 h-full flex flex-col">
+                        <div className="flex justify-between items-center">
+                            <h2 className="text-2xl font-bold text-gray-800">Review & Export</h2>
+                            <span className="bg-green-100 text-green-800 px-4 py-1 rounded-full text-sm font-bold">Total: {countWords(text)} words</span>
+                        </div>
+                        <p className="text-gray-500 text-sm">Your segmented text compiled into one document. Ready to copy.</p>
+                        
+                        <div className="flex-1 bg-gray-50 border border-gray-300 rounded-lg p-6 font-serif text-gray-800 whitespace-pre-wrap overflow-y-auto leading-loose text-lg">
+                            {text || "Start writing in the tabs to see your compiled essay here."}
+                        </div>
+
+                        <button onClick={() => copyToClipboard(text)} className="w-full bg-indigo-600 text-white font-bold text-lg py-4 rounded-lg shadow-lg hover:bg-indigo-700 transition">
+                            Copy Essay to Clipboard
+                        </button>
+                    </div>
+                );
+            };
+
+            const tabs = [
+                { id: "setup", icon: "📝", label: "Setup & Brainstorm" },
+                { id: "sources", icon: "📚", label: "Sheet 2: Sources" },
+                { id: "intro", icon: "🚀", label: "Sheet 3: Intro" },
+                { id: "body", icon: "⚖️", label: `Body Paras (${essay.bodyParas.length})` },
+                { id: "conc", icon: "🏁", label: "Conclusion" },
+                { id: "compile", icon: "📄", label: "Compile" }
+            ];
+
+            return (
+                <div className="flex w-full h-full">
+                    {/* Left Nav */}
+                    <div className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-sm">
+                        <div className="p-4 border-b">
+                            <h3 className="font-bold text-gray-800 truncate" title={essay.title}>{essay.title}</h3>
+                            <div className="text-xs text-gray-500 font-medium mt-1">Due: {essay.dueDate || "Not set"}</div>
+                        </div>
+                        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+                            {tabs.map(t => (
+                                <button key={t.id} onClick={() => setActiveTab(t.id)} 
+                                    className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold transition flex items-center gap-3 ${activeTab === t.id ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}`}>
+                                    <span>{t.icon}</span> {t.label}
+                                </button>
+                            ))}
+                        </nav>
+                    </div>
+
+                    {/* Editor Canvas */}
+                    <div className="flex-1 overflow-y-auto p-8 relative">
+                        <div className="max-w-4xl mx-auto h-full">
+                            {activeTab === 'setup' && renderSetup()}
+                            {activeTab === 'sources' && renderSources()}
+                            {activeTab === 'intro' && renderIntro()}
+                            {activeTab === 'body' && renderBody()}
+                            {activeTab === 'conc' && renderConclusion()}
+                            {activeTab === 'compile' && renderCompile()}
+                        </div>
+                    </div>
+
+                    {/* Right Phrasebank Sidebar */}
+                    {showCheatSheet ? (
+                        <div className="w-80 bg-white border-l border-gray-200 flex flex-col shadow-lg z-10 text-sm">
+                            <div className="p-4 border-b border-gray-200 bg-indigo-50 flex justify-between items-center">
+                                <h3 className="font-bold text-indigo-800">Academic Phrasebank</h3>
+                                <button onClick={() => setShowCheatSheet(false)} className="text-indigo-500 hover:text-indigo-800 font-bold">Close</button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                                <p className="text-xs text-gray-500 italic mb-2">Click any phrase to copy it to your clipboard instantly.</p>
+                                
+                                {PHRASEBANK.map(group => (
+                                    <div key={group.category}>
+                                        <h4 className="font-bold text-gray-800 border-b pb-1 mb-2">{group.category}</h4>
+                                        <ul className="space-y-1">
+                                            {group.phrases.map((phrase, i) => (
+                                                <li key={i}>
+                                                    <button onClick={() => copyToClipboard(phrase)} className="phrase-btn w-full text-left p-2 rounded bg-gray-50 hover:bg-indigo-100 text-gray-700 hover:text-indigo-800 transition border border-transparent hover:border-indigo-200 text-xs">
+                                                        {phrase}
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                ))}
+
+                                <div>
+                                    <h4 className="font-bold text-gray-800 border-b pb-1 mb-2">Process Words</h4>
+                                    <ul className="space-y-2 text-xs text-gray-600">
+                                        {PROCESS_WORDS.map(pw => (
+                                            <li key={pw.word}><strong className="text-gray-800">{pw.word}:</strong> {pw.def}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-indigo-700 text-white flex items-center justify-center w-10 cursor-pointer hover:bg-indigo-600 transition" onClick={() => setShowCheatSheet(true)}>
+                            <span className="transform -rotate-90 origin-center text-xs font-bold tracking-widest whitespace-nowrap block mt-10">
+                                PHRASEBANK
+                            </span>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
+
