@@ -38,7 +38,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         function useLocalStorage(key, initialValue) {
             const [storedValue, setStoredValue] = useState(() => {
@@ -89,9 +89,10 @@
         ];
 
         const PHRASEBANK = [
+            { category: "Alternatives for 'However' (Counter Points)", phrases: ["Nevertheless, ", "Conversely, ", "On the contrary, ", "In contrast, ", "Alternatively, "] },
+            { category: "Alternatives for 'This shows'", phrases: ["This demonstrates...", "This indicates...", "This implies...", "This suggests...", "This reveals...", "This highlights..."] },
             { category: "Strength of Evidence", phrases: ["The existing evidence for X is strong.", "There is limited evidence to suggest that...", "The evidence presented clearly indicates...", "Mounting evidence suggests..."] },
             { category: "Adding / Emphasising", phrases: ["Furthermore, ", "Moreover, ", "In addition to this, ", "Equally important is..."] },
-            { category: "Contrasting / Opposing", phrases: ["Conversely, ", "Nevertheless, ", "On the contrary, ", "Despite this evidence, ", "However, "] },
             { category: "Concluding / Causal", phrases: ["Thus, ", "Therefore, ", "Consequently, ", "As a result, ", "In summary, "] }
         ];
 
@@ -102,10 +103,10 @@
             title: "New Essay Draft",
             dueDate: "",
             isCompleted: false,
-            setup: { question: "", processWord: "", thesis: "", targetWordCount: "1500" },
+            setup: { question: "", processWord: "", thesis: "", theory: "", targetWordCount: "1500" },
             brainstorm: { 
-                pros: [{ id: Date.now(), point: "", evidence: "", evidence2: "", explain: "", link: "" }], 
-                cons: [{ id: Date.now() + 1, point: "", evidence: "", evidence2: "", explain: "", critique: "", explainCritique: "", link: "", miniConclusion: "" }] 
+                pros: [{ id: Date.now(), signpost: "", point: "", evidence: "", evidence2: "", explain: "", link: "" }], 
+                cons: [{ id: Date.now() + 1, signpost: "", point: "", evidence: "", evidence2: "", explain: "", critique: "", explainCritique: "", link: "", miniConclusion: "" }] 
             },
             sources: {
                 introStat: "", introDef1: "", introDef2: "",
@@ -118,6 +119,35 @@
             ],
             conclusion: { summarise: "", evaluate: "", limitations: "", future: "" }
         });
+
+        // --- Custom Component: Auto-Expanding Textarea ---
+        const AutoExpandTextarea = ({ value, onChange, placeholder, expand, className }) => {
+            const textareaRef = useRef(null);
+
+            useEffect(() => {
+                if (textareaRef.current) {
+                    if (expand) {
+                        textareaRef.current.style.height = 'auto';
+                        textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+                        textareaRef.current.style.overflow = 'hidden';
+                    } else {
+                        textareaRef.current.style.height = '42px'; // roughly one line height
+                        textareaRef.current.style.overflow = 'auto';
+                    }
+                }
+            }, [value, expand]);
+
+            return (
+                <textarea
+                    ref={textareaRef}
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    placeholder={placeholder}
+                    className={`w-full p-2 text-sm rounded outline-none focus:ring-1 resize-none ${className}`}
+                    rows={1}
+                />
+            );
+        };
 
         function App() {
             const [essays, setEssays] = useLocalStorage("essay_architect_projects", []);
@@ -335,6 +365,7 @@
         function Workspace({ essay, updateEssay, notify }) {
             const [activeTab, setActiveTab] = useState("setup");
             const [showCheatSheet, setShowCheatSheet] = useState(true);
+            const [expandCells, setExpandCells] = useLocalStorage("essay_expand_cells", true);
 
             const [isRefViewerOpen, setIsRefViewerOpen] = useState(false);
             const [referenceFiles, setReferenceFiles] = useState([]);
@@ -364,17 +395,18 @@
             // Backward compatibility
             const currentBrainstorm = essay.brainstorm || { pros: [], cons: [] };
             const currentSources = essay.sources || { introStat: "", introDef1: "", introDef2: "", bodySources: [], bibliography: "" };
+            const currentSetup = essay.setup || { question: "", processWord: "", thesis: "", theory: "", targetWordCount: "1500" };
 
             const updateRoot = (field, val) => updateEssay({ ...essay, [field]: val });
-            const updateSetup = (field, val) => updateEssay({ ...essay, setup: { ...essay.setup, [field]: val } });
+            const updateSetup = (field, val) => updateEssay({ ...essay, setup: { ...currentSetup, [field]: val } });
             const updateSources = (field, val) => updateEssay({ ...essay, sources: { ...currentSources, [field]: val } });
             const updateIntro = (field, val) => updateEssay({ ...essay, intro: { ...essay.intro, [field]: val } });
             const updateConclusion = (field, val) => updateEssay({ ...essay, conclusion: { ...essay.conclusion, [field]: val } });
             
             const addBrainstormPoint = (type) => {
                 const newPoint = type === 'pros'
-                    ? { id: Date.now(), point: "", evidence: "", evidence2: "", explain: "", link: "" }
-                    : { id: Date.now(), point: "", evidence: "", evidence2: "", explain: "", critique: "", explainCritique: "", link: "", miniConclusion: "" };
+                    ? { id: Date.now(), signpost: "", point: "", evidence: "", evidence2: "", explain: "", link: "" }
+                    : { id: Date.now(), signpost: "", point: "", evidence: "", evidence2: "", explain: "", critique: "", explainCritique: "", link: "", miniConclusion: "" };
                 updateEssay({ ...essay, brainstorm: { ...currentBrainstorm, [type]: [...currentBrainstorm[type], newPoint] } });
             };
             const updateBrainstormField = (type, id, field, val) => {
@@ -408,18 +440,35 @@
 
             const copyToClipboard = (text) => navigator.clipboard.writeText(text).then(() => notify("Copied to clipboard!"));
 
+            // Interleaves Pro 1, Counter 1, Pro 2, Counter 2...
+            const getInterleavedBrainstorm = () => {
+                const interleaved = [];
+                const max = Math.max(currentBrainstorm.pros.length, currentBrainstorm.cons.length);
+                for (let i = 0; i < max; i++) {
+                    if (currentBrainstorm.pros[i]) interleaved.push({ ...currentBrainstorm.pros[i], type: 'PRO', idx: i + 1 });
+                    if (currentBrainstorm.cons[i]) interleaved.push({ ...currentBrainstorm.cons[i], type: 'COUNTER', idx: i + 1 });
+                }
+                return interleaved;
+            };
+
             const copyBrainstormPlan = () => {
                 let text = "ESSAY TEMPLATE / PARAGRAPH PLAN\n\n";
-                text += `THESIS: ${essay.setup.thesis || 'Not yet defined'}\n\n`;
-                text += "--- PRO PARAGRAPHS ---\n\n";
-                currentBrainstorm.pros.forEach((p, idx) => {
-                    const para = `${p.point || ''} ${p.evidence || ''} ${p.evidence2 || ''} ${p.explain || ''} ${p.link || ''}`.trim();
-                    text += `Paragraph ${idx + 1}:\n${para}\n\n`;
-                });
-                text += "--- COUNTER PARAGRAPHS ---\n\n";
-                currentBrainstorm.cons.forEach((c, idx) => {
-                    const para = `${c.point || ''} ${c.evidence || ''} ${c.evidence2 || ''} ${c.explain || ''} ${c.critique || ''} ${c.explainCritique || ''} ${c.link || ''} ${c.miniConclusion || ''}`.trim();
-                    text += `Paragraph ${idx + 1}:\n${para}\n\n`;
+                text += `THESIS: ${currentSetup.thesis || 'Not yet defined'}\n`;
+                text += `THEORY/FRAMEWORK: ${currentSetup.theory || 'Not yet defined'}\n\n`;
+                text += "--- INTRODUCTION ---\n";
+                text += `${essay.intro.statOpening || ''} ${essay.intro.background || ''} ${essay.intro.defineWords || ''} ${essay.intro.thesis || ''} ${essay.intro.structure || ''}\n\n`;
+                
+                text += "--- BODY PARAGRAPHS ---\n\n";
+                const interleaved = getInterleavedBrainstorm();
+                interleaved.forEach((p) => {
+                    const label = p.type === 'PRO' ? `Pro Paragraph ${p.idx}` : `Counter Paragraph ${p.idx}`;
+                    let para = "";
+                    if (p.type === 'PRO') {
+                        para = `${p.signpost || ''} ${p.point || ''} ${p.evidence || ''} ${p.evidence2 || ''} ${p.explain || ''} ${p.link || ''}`;
+                    } else {
+                        para = `${p.signpost || ''} ${p.point || ''} ${p.evidence || ''} ${p.evidence2 || ''} ${p.explain || ''} ${p.critique || ''} ${p.explainCritique || ''} ${p.link || ''} ${p.miniConclusion || ''}`;
+                    }
+                    text += `${label}:\n${para.replace(/\s+/g, ' ').trim()}\n\n`;
                 });
                 copyToClipboard(text);
             };
@@ -428,7 +477,17 @@
                 const i = essay.intro;
                 const introText = `${i.statOpening} ${i.background} ${i.defineWords} ${i.thesis} ${i.structure}`.trim();
                 
-                const bodyText = essay.bodyParas.map(p => {
+                // Interleave actual Body Paragraphs (Pro 1, Con 1, Pro 2, Con 2)
+                const pros = essay.bodyParas.filter(p => p.type === 'PRO');
+                const cons = essay.bodyParas.filter(p => p.type === 'COUNTER');
+                const interleavedBody = [];
+                const maxLen = Math.max(pros.length, cons.length);
+                for(let j=0; j<maxLen; j++) {
+                    if (pros[j]) interleavedBody.push(pros[j]);
+                    if (cons[j]) interleavedBody.push(cons[j]);
+                }
+
+                const bodyText = interleavedBody.map(p => {
                     return `${p.signpost} ${p.source} ${p.source2 || ''} ${p.explain} ${p.critical} ${p.explainCritique || ''} ${p.caseStudy} ${p.link} ${p.evaluation || ''}`.replace(/\s+/g, ' ').trim();
                 }).join("\n\n");
 
@@ -444,89 +503,125 @@
                 <div className="space-y-6">
                     <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
                         <div>
-                            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">1. Setup & Plan</h2>
-                            <p className="text-gray-500 dark:text-gray-400 text-sm">Define the core parameters and deadline for this essay.</p>
+                            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">1. Setup & Intro Plan</h2>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm">Define your parameters, thesis, and sketch out the introduction.</p>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Essay Title</label>
-                                <input type="text" className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500" 
+                                <input type="text" className="w-full p-3 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
                                     value={essay.title} onChange={e => updateRoot("title", e.target.value)} />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Due Date</label>
-                                <input type="date" className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 [color-scheme:light] dark:[color-scheme:dark]" 
+                                <input type="date" className="w-full p-3 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none [color-scheme:light] dark:[color-scheme:dark]" 
                                     value={essay.dueDate} onChange={e => updateRoot("dueDate", e.target.value)} />
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Target Word Count</label>
                                 <div className="flex flex-col">
-                                    <input type="number" className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500" 
-                                        value={essay.setup.targetWordCount || ""} onChange={e => updateSetup("targetWordCount", e.target.value)} placeholder="e.g. 1500" />
-                                    {essay.setup.targetWordCount && (
+                                    <input type="number" className="w-full p-3 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                        value={currentSetup.targetWordCount || ""} onChange={e => updateSetup("targetWordCount", e.target.value)} placeholder="e.g. 1500" />
+                                    {currentSetup.targetWordCount && (
                                         <span className="text-xs text-gray-500 dark:text-gray-400 font-medium mt-1">
-                                            ±10%: {Math.floor(essay.setup.targetWordCount * 0.9)} to {Math.ceil(essay.setup.targetWordCount * 1.1)}
+                                            ±10%: {Math.floor(currentSetup.targetWordCount * 0.9)} to {Math.ceil(currentSetup.targetWordCount * 1.1)}
                                         </span>
                                     )}
                                 </div>
                             </div>
                         </div>
 
-                        <div className="mt-4">
-                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">The Question</label>
-                            <textarea className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500" rows="2"
-                                value={essay.setup.question} onChange={e => updateSetup("question", e.target.value)} placeholder="What exactly are you answering?"></textarea>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">The Question</label>
+                                <textarea className="w-full p-3 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" rows="2"
+                                    value={currentSetup.question} onChange={e => updateSetup("question", e.target.value)} placeholder="What exactly are you answering?"></textarea>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Process Word (From Step 1)</label>
+                                <select className="w-full p-3 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                    value={currentSetup.processWord} onChange={e => updateSetup("processWord", e.target.value)}>
+                                    <option value="">Select process word...</option>
+                                    {PROCESS_WORDS.map(pw => <option key={pw.word} value={pw.word}>{pw.word}</option>)}
+                                </select>
+                                {currentSetup.processWord && (
+                                    <p className="text-sm mt-2 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 p-2 rounded-lg font-medium border border-indigo-100 dark:border-indigo-800">
+                                        <strong>Meaning:</strong> {PROCESS_WORDS.find(p => p.word === currentSetup.processWord)?.def}
+                                    </p>
+                                )}
+                            </div>
                         </div>
 
-                        <div className="mt-4">
-                            <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Process Word (From Step 1)</label>
-                            <select className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                value={essay.setup.processWord} onChange={e => updateSetup("processWord", e.target.value)}>
-                                <option value="">Select process word...</option>
-                                {PROCESS_WORDS.map(pw => <option key={pw.word} value={pw.word}>{pw.word}</option>)}
-                            </select>
-                            {essay.setup.processWord && (
-                                <p className="text-sm mt-2 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 p-3 rounded-lg font-medium border border-indigo-100 dark:border-indigo-800">
-                                    <strong>Meaning:</strong> {PROCESS_WORDS.find(p => p.word === essay.setup.processWord)?.def}
-                                </p>
-                            )}
+                        <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+                            <h3 className="text-lg font-bold text-indigo-800 dark:text-indigo-400 mb-4">Core Arguments & Framework</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Working Thesis</label>
+                                    <textarea className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-indigo-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-medium resize-y" rows="3"
+                                        value={currentSetup.thesis} onChange={e => { updateSetup("thesis", e.target.value); updateIntro("thesis", e.target.value); }} placeholder="State your main argument clearly (Anchor to a child)..."></textarea>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Theory / Theoretical Framework</label>
+                                    <textarea className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-indigo-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-y" rows="3"
+                                        value={currentSetup.theory || ""} onChange={e => updateSetup("theory", e.target.value)} placeholder="What academic theory or framework are you using to analyze the question?"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+                            <h3 className="text-lg font-bold text-indigo-800 dark:text-indigo-400 mb-2">Introduction Planning</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Sketch out the intro here. It automatically syncs with your writing tab.</p>
+                            <div className="space-y-3 bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                                <AutoExpandTextarea expand={expandCells} value={essay.intro.statOpening} onChange={v => updateIntro("statOpening", v)} placeholder="Hook / Opening Stat (~50 words)..." className="bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600" />
+                                <AutoExpandTextarea expand={expandCells} value={essay.intro.background} onChange={v => updateIntro("background", v)} placeholder="Background / Value (~50 words)..." className="bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600" />
+                                <AutoExpandTextarea expand={expandCells} value={essay.intro.defineWords} onChange={v => updateIntro("defineWords", v)} placeholder="Define Process Words/Measures (~50 words)..." className="bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600" />
+                                <AutoExpandTextarea expand={expandCells} value={essay.intro.structure} onChange={v => updateIntro("structure", v)} placeholder="Structure / Map (~50 words: How will the essay flow?)..." className="bg-white dark:bg-gray-800 text-gray-800 dark:text-white border-gray-300 dark:border-gray-600" />
+                            </div>
                         </div>
                     </div>
 
                     <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                        <div className="flex justify-between items-center mb-4">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                             <div>
                                 <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-1">Brainstorming Board (Template Step 4)</h2>
-                                <p className="text-gray-500 dark:text-gray-400 text-sm">Synthesize your points. Top grades require merging two sources (e.g. Zubi, 2022; Jon, 2023).</p>
+                                <p className="text-gray-500 dark:text-gray-400 text-sm">Synthesize points. Ensure equal representation. Will export interleaved (Pro 1, Con 1...).</p>
                             </div>
-                            <button onClick={copyBrainstormPlan} className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition shadow-sm">
-                                📋 Export Paragraph Plan
-                            </button>
+                            <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-gray-600 dark:text-gray-300">
+                                    <input type="checkbox" checked={expandCells} onChange={e => setExpandCells(e.target.checked)} className="w-4 h-4 text-indigo-600 focus:ring-indigo-500" />
+                                    Expand Cells
+                                </label>
+                                <button onClick={copyBrainstormPlan} className="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition shadow-sm">
+                                    📋 Export Plan
+                                </button>
+                            </div>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-100 dark:border-green-800/50">
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="font-bold text-green-800 dark:text-green-400">Pro Points (For)</h3>
-                                    <button onClick={() => addBrainstormPoint('pros')} className="text-xs bg-green-600 dark:bg-green-700 text-white px-3 py-1.5 rounded font-bold hover:bg-green-700 dark:hover:bg-green-600 shadow-sm">+ Add Paragraph Plan</button>
+                                    <button onClick={() => addBrainstormPoint('pros')} className="text-xs bg-green-600 dark:bg-green-700 text-white px-3 py-1.5 rounded font-bold hover:bg-green-700 dark:hover:bg-green-600 shadow-sm">+ Add Paragraph</button>
                                 </div>
                                 <div className="space-y-4">
                                     {currentBrainstorm.pros.map((p, idx) => (
                                         <div key={p.id} className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm border border-green-200 dark:border-green-800/50 relative">
                                             <button onClick={() => removeBrainstormPoint('pros', p.id)} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 font-bold px-2">✕</button>
-                                            <span className="font-bold text-green-700 dark:text-green-500 text-xs mb-2 block uppercase tracking-wide">Paragraph {idx + 1}</span>
+                                            <span className="font-bold text-green-700 dark:text-green-500 text-xs mb-2 block uppercase tracking-wide">Pro Paragraph {idx + 1}</span>
                                             <div className="space-y-2">
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-green-400"
-                                                    placeholder="1. Point (Make a claim)..." value={p.point !== undefined ? p.point : (p.text || '')} onChange={e => updateBrainstormField('pros', p.id, 'point', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-green-400"
-                                                    placeholder="2a. Evidence 1 (Zubi, 2022 - did what?)..." value={p.evidence || ''} onChange={e => updateBrainstormField('pros', p.id, 'evidence', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-green-400"
-                                                    placeholder="2b. Evidence 2 (Synthesize: Jon, 2023 - agrees?)..." value={p.evidence2 || ''} onChange={e => updateBrainstormField('pros', p.id, 'evidence2', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-green-400"
-                                                    placeholder="3. Explain (Relevance to point)..." value={p.explain || ''} onChange={e => updateBrainstormField('pros', p.id, 'explain', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-green-400"
-                                                    placeholder="4. Link (Summarise -> Link thesis -> Hint next)..." value={p.link || ''} onChange={e => updateBrainstormField('pros', p.id, 'link', e.target.value)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-green-400"
+                                                    placeholder="1a. Signpost (e.g. First, Furthermore)..." value={p.signpost || ''} onChange={e => updateBrainstormField('pros', p.id, 'signpost', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-green-400"
+                                                    placeholder="1b. Point (~50w: Make a claim)..." value={p.point !== undefined ? p.point : (p.text || '')} onChange={e => updateBrainstormField('pros', p.id, 'point', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-green-400"
+                                                    placeholder="2a. Evidence 1 (~50w: Jon, 2023 - did what?)..." value={p.evidence || ''} onChange={e => updateBrainstormField('pros', p.id, 'evidence', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-green-400"
+                                                    placeholder="2b. Evidence 2 (Synthesize: Zubi, 2022 - agrees?)..." value={p.evidence2 || ''} onChange={e => updateBrainstormField('pros', p.id, 'evidence2', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-green-400"
+                                                    placeholder="3. Explain (~75w+: 'This demonstrates...' / Relevance)..." value={p.explain || ''} onChange={e => updateBrainstormField('pros', p.id, 'explain', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-green-400"
+                                                    placeholder="4. Link (~50w: Summarise -> Link thesis -> Hint next)..." value={p.link || ''} onChange={e => updateBrainstormField('pros', p.id, 'link', e)} />
                                             </div>
                                         </div>
                                     ))}
@@ -536,48 +631,42 @@
                             <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg border border-red-100 dark:border-red-800/50">
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="font-bold text-red-800 dark:text-red-400">Counter Points (Against)</h3>
-                                    <button onClick={() => addBrainstormPoint('cons')} className="text-xs bg-red-600 dark:bg-red-700 text-white px-3 py-1.5 rounded font-bold hover:bg-red-700 dark:hover:bg-red-600 shadow-sm">+ Add Paragraph Plan</button>
+                                    <button onClick={() => addBrainstormPoint('cons')} className="text-xs bg-red-600 dark:bg-red-700 text-white px-3 py-1.5 rounded font-bold hover:bg-red-700 dark:hover:bg-red-600 shadow-sm">+ Add Paragraph</button>
                                 </div>
                                 <div className="space-y-4">
                                     {currentBrainstorm.cons.map((c, idx) => (
                                         <div key={c.id} className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm border border-red-200 dark:border-red-800/50 relative">
                                             <button onClick={() => removeBrainstormPoint('cons', c.id)} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 font-bold px-2">✕</button>
-                                            <span className="font-bold text-red-700 dark:text-red-500 text-xs mb-2 block uppercase tracking-wide">Paragraph {idx + 1}</span>
+                                            <span className="font-bold text-red-700 dark:text-red-500 text-xs mb-2 block uppercase tracking-wide">Counter Paragraph {idx + 1}</span>
                                             <div className="space-y-2">
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-red-400"
-                                                    placeholder="1. Point (Counter claim)..." value={c.point !== undefined ? c.point : (c.text || '')} onChange={e => updateBrainstormField('cons', c.id, 'point', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-red-400"
-                                                    placeholder="2a. Evidence 1 (Zubi, 2022 - found what?)..." value={c.evidence || ''} onChange={e => updateBrainstormField('cons', c.id, 'evidence', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-red-400"
-                                                    placeholder="2b. Evidence 2 (Synthesize: Jon, 2023)..." value={c.evidence2 || ''} onChange={e => updateBrainstormField('cons', c.id, 'evidence2', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-red-400"
-                                                    placeholder="3. Explain (Relevance)..." value={c.explain || ''} onChange={e => updateBrainstormField('cons', c.id, 'explain', e.target.value)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-400"
+                                                    placeholder="1a. Signpost (Use alternative for However: Conversely, Nevertheless...)" value={c.signpost || ''} onChange={e => updateBrainstormField('cons', c.id, 'signpost', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-400"
+                                                    placeholder="1b. Point (~50w: Counter claim)..." value={c.point !== undefined ? c.point : (c.text || '')} onChange={e => updateBrainstormField('cons', c.id, 'point', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-400"
+                                                    placeholder="2a. Evidence 1 (~50w: Zubi, 2022 - found what?)..." value={c.evidence || ''} onChange={e => updateBrainstormField('cons', c.id, 'evidence', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-400"
+                                                    placeholder="2b. Evidence 2 (Synthesize: Jon, 2023)..." value={c.evidence2 || ''} onChange={e => updateBrainstormField('cons', c.id, 'evidence2', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-400"
+                                                    placeholder="3. Explain (~75w+: 'This implies...' / Relevance)..." value={c.explain || ''} onChange={e => updateBrainstormField('cons', c.id, 'explain', e)} />
                                                 
-                                                {/* Deep Critique Split */}
                                                 <div className="bg-red-50 dark:bg-red-900/30 p-2 rounded border border-red-100 dark:border-red-800/50 space-y-2">
-                                                    <input className="w-full p-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-red-500"
-                                                        placeholder="4a. Critical Evidence (Source that contradicts)..." value={c.critique || ''} onChange={e => updateBrainstormField('cons', c.id, 'critique', e.target.value)} />
-                                                    <input className="w-full p-2 text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-red-500"
-                                                        placeholder="4b. Explain Gap (Evaluate limitations of evidence)..." value={c.explainCritique || ''} onChange={e => updateBrainstormField('cons', c.id, 'explainCritique', e.target.value)} />
+                                                    <AutoExpandTextarea expand={expandCells} className="bg-white dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-500"
+                                                        placeholder="4a. Critical Evidence (Source that contradicts)..." value={c.critique || ''} onChange={e => updateBrainstormField('cons', c.id, 'critique', e)} />
+                                                    <AutoExpandTextarea expand={expandCells} className="bg-white dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-500"
+                                                        placeholder="4b. Explain Gap (Evaluate limitations)..." value={c.explainCritique || ''} onChange={e => updateBrainstormField('cons', c.id, 'explainCritique', e)} />
                                                 </div>
 
-                                                <input className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border border-gray-200 dark:border-gray-600 rounded outline-none focus:ring-1 focus:ring-red-400"
-                                                    placeholder="5. Link (Summarise -> Link thesis -> Hint next)..." value={c.link || ''} onChange={e => updateBrainstormField('cons', c.id, 'link', e.target.value)} />
-                                                <input className="w-full p-2 text-sm bg-indigo-50 dark:bg-indigo-900/30 text-gray-800 dark:text-white border border-indigo-100 dark:border-indigo-800/50 rounded outline-none focus:ring-1 focus:ring-indigo-500"
-                                                    placeholder="6. Mini Conclusion (Which side is better?)..." value={c.miniConclusion || ''} onChange={e => updateBrainstormField('cons', c.id, 'miniConclusion', e.target.value)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white border-gray-200 dark:border-gray-600 focus:ring-red-400"
+                                                    placeholder="5. Link (~50w: Summarise -> Link thesis -> Hint next)..." value={c.link || ''} onChange={e => updateBrainstormField('cons', c.id, 'link', e)} />
+                                                <AutoExpandTextarea expand={expandCells} className="bg-indigo-50 dark:bg-indigo-900/30 text-gray-800 dark:text-white border-indigo-100 dark:border-indigo-800/50 focus:ring-indigo-500"
+                                                    placeholder="6. Mini Conclusion (~50w: Which side is better?)..." value={c.miniConclusion || ''} onChange={e => updateBrainstormField('cons', c.id, 'miniConclusion', e)} />
                                             </div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 border-l-4 border-l-indigo-500">
-                        <label className="block text-lg font-bold text-indigo-800 dark:text-indigo-400 mb-1">Working Thesis</label>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">Review your brainstorm above. What is the core argument you will defend?</p>
-                        <textarea className="w-full p-3 bg-white dark:bg-gray-700 text-gray-800 dark:text-white border border-indigo-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 font-medium" rows="3"
-                            value={essay.setup.thesis} onChange={e => updateSetup("thesis", e.target.value)} placeholder="State your main argument clearly..."></textarea>
                     </div>
                 </div>
             );
@@ -647,10 +736,12 @@
             const renderIntro = () => (
                 <div className="space-y-6 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
                     <h2 className="text-2xl font-bold text-gray-800 dark:text-white">3. Introduction (Sheet 3)</h2>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">Target: ~250 words total. (Syncs with Setup tab).</p>
+
                     <WordCountTextarea label="Stat/Opening (50 words)" target={50} value={essay.intro.statOpening} onChange={v => updateIntro("statOpening", v)} helpText="Shocking fact or quote." />
                     <WordCountTextarea label="Background/Value (50 words)" target={50} value={essay.intro.background} onChange={v => updateIntro("background", v)} helpText="What is debated? Since when?" />
                     <WordCountTextarea label="Define Words (50 words)" target={50} value={essay.intro.defineWords} onChange={v => updateIntro("defineWords", v)} helpText="Define process words/measures." />
-                    <WordCountTextarea label="Thesis Statement (50 words)" target={50} value={essay.intro.thesis} onChange={v => updateIntro("thesis", v)} helpText="One clear line. Simple enough for a child. No Evidence here!" />
+                    <WordCountTextarea label="Thesis Statement (50 words)" target={50} value={essay.intro.thesis} onChange={v => { updateIntro("thesis", v); updateSetup("thesis", v); }} helpText="One clear line. Simple enough for a child. No Evidence here!" />
                     <WordCountTextarea label="Structure (50 words)" target={50} value={essay.intro.structure} onChange={v => updateIntro("structure", v)} helpText="Signposts for each body paragraph." />
                 </div>
             );
@@ -679,18 +770,16 @@
                                 <button onClick={() => removeParagraph(para.id)} className="text-red-400 dark:text-red-500 text-sm font-bold hover:underline">Remove Paragraph</button>
                             </div>
 
-                            <WordCountTextarea label="Signpost/Point (50 words)" target={50} value={para.signpost} onChange={v => updateBodyPara(para.id, "signpost", v)} helpText="Link from above. Key claim." />
+                            <WordCountTextarea label="Signpost & Point (50 words)" target={50} value={para.signpost} onChange={v => updateBodyPara(para.id, "signpost", v)} helpText={para.type === 'PRO' ? "Link from above. Key claim." : "Start with a 'However' alternative (e.g. Conversely, Nevertheless). Then state Counter claim."} />
                             
-                            {/* Synthesis Upgrade */}
                             <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700 mb-5">
                                 <h4 className="font-bold text-gray-700 dark:text-gray-300 mb-2 text-sm">Synthesize Evidence (Top Grades)</h4>
                                 <WordCountTextarea label="Source 1 (e.g. Jon, 2023)" target={50} value={para.source} onChange={v => updateBodyPara(para.id, "source", v)} />
                                 <WordCountTextarea label="Source 2 (e.g. Zubi, 2022)" target={50} value={para.source2 || ""} onChange={v => updateBodyPara(para.id, "source2", v)} helpText="Merge a second paper to strengthen the point." />
                             </div>
 
-                            <WordCountTextarea label="Explain - Relevance (75+ words)" target={75} value={para.explain} onChange={v => updateBodyPara(para.id, "explain", v)} helpText="Don't rephrase! Link to theory." />
+                            <WordCountTextarea label="Explain - Relevance (75+ words)" target={75} value={para.explain} onChange={v => updateBodyPara(para.id, "explain", v)} helpText="Don't rephrase! Link to theory. (Use phrasebank: 'This demonstrates...')" />
                             
-                            {/* Deep Critique Split */}
                             <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-800/50 mb-5">
                                 <h4 className="font-bold text-orange-800 dark:text-orange-400 mb-2 text-sm">Critical Analysis</h4>
                                 <WordCountTextarea label="Critical Evidence (50 words)" target={50} value={para.critical} onChange={v => updateBodyPara(para.id, "critical", v)} helpText="Contradict the evidence you supplied above." />
@@ -723,12 +812,15 @@
             const renderCompile = () => {
                 const text = compileFullEssay();
                 
-                // Calculate Debate Balance (Outline.pdf)
                 const proWords = essay.bodyParas.filter(p => p.type === 'PRO').reduce((acc, p) => acc + countWords(`${p.signpost} ${p.source} ${p.source2 || ''} ${p.explain} ${p.critical} ${p.explainCritique || ''} ${p.caseStudy} ${p.link}`), 0);
                 const conWords = essay.bodyParas.filter(p => p.type === 'COUNTER').reduce((acc, p) => acc + countWords(`${p.signpost} ${p.source} ${p.source2 || ''} ${p.explain} ${p.critical} ${p.explainCritique || ''} ${p.caseStudy} ${p.link} ${p.evaluation || ''}`), 0);
                 const totalDebate = proWords + conWords || 1;
                 const proPercent = Math.round((proWords / totalDebate) * 100);
                 const conPercent = 100 - proPercent;
+                
+                const targetCount = parseInt(currentSetup.targetWordCount) || 1500;
+                const actualWords = countWords(text);
+                const inRange = actualWords >= Math.floor(targetCount * 0.9) && actualWords <= Math.ceil(targetCount * 1.1);
 
                 return (
                     <div className="space-y-6 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 h-full flex flex-col">
@@ -736,7 +828,6 @@
                             <h2 className="text-2xl font-bold text-gray-800 dark:text-white">Review & Export</h2>
                         </div>
                         
-                        {/* Debate Balance Meter */}
                         <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
                             <h4 className="font-bold text-gray-800 dark:text-gray-200 mb-2 text-sm flex justify-between">
                                 <span>⚖️ Debate Balance (Target ~50/50)</span>
@@ -746,15 +837,12 @@
                                 <div className="bg-green-500 h-full flex items-center justify-center text-[10px] text-white font-bold" style={{ width: `${proPercent}%` }}>{proPercent}% PRO</div>
                                 <div className="bg-red-500 h-full flex items-center justify-center text-[10px] text-white font-bold" style={{ width: `${conPercent}%` }}>{conPercent}% CON</div>
                             </div>
-                            {Math.abs(proPercent - 50) > 15 && totalDebate > 50 && (
-                                <p className="text-xs text-red-500 mt-2 font-bold">⚠️ Warning: Your argument is heavily skewed. Outline.pdf requires both sides to be equally represented!</p>
-                            )}
                         </div>
 
                         <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800/50">
                             <h4 className="font-bold text-indigo-900 dark:text-indigo-300 mb-2">✅ Pre-Submission Checklist</h4>
                             <ul className="text-sm text-indigo-800 dark:text-indigo-400 space-y-1 ml-4 list-disc marker:text-indigo-400">
-                                <li>Remove subheadings and ensure formal language (Max 1 Clause).</li>
+                                <li>Remove subheadings and ensure formal language.</li>
                                 <li>Check font size, page count, and marking sheet headers.</li>
                                 <li>Run through Grammarly or "Read Aloud" in Word.</li>
                                 <li>Ask AI (Gemini) to critique the final draft.</li>
@@ -766,7 +854,7 @@
                         </div>
 
                         <button onClick={() => copyToClipboard(text)} className="w-full bg-indigo-600 dark:bg-indigo-500 text-white font-bold text-lg py-4 rounded-lg shadow-lg hover:bg-indigo-700 dark:hover:bg-indigo-600 transition mt-4">
-                            Copy Essay & References to Clipboard
+                            Copy Essay & References (Interleaved)
                         </button>
                     </div>
                 );
@@ -884,7 +972,7 @@
                                 <button onClick={() => setShowCheatSheet(false)} className="text-indigo-500 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 font-bold">Close</button>
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                                <p className="text-xs text-gray-500 dark:text-gray-400 italic mb-2">Click any phrase to copy it to your clipboard instantly.</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 italic mb-2">Click any phrase to copy it.</p>
                                 
                                 {PHRASEBANK.map(group => (
                                     <div key={group.category}>
@@ -927,6 +1015,5 @@
     </script>
 </body>
 </html>
-
 
 
